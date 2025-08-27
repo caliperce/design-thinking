@@ -1,7 +1,10 @@
 {
   "compilerOptions": {
+    "baseUrl": "src",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "Backgrounds": ["components/hero.jsx"]
     }
-  }
+  },
+  "include": ["src/**/*"]
 }
