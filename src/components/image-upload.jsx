@@ -5,8 +5,14 @@ import { ImagePlus, X, Upload, Trash2 } from "lucide-react"
 import Image from "next/image"
 import { useCallback, useState } from "react"
 import { cn } from "../lib/utils"
+import { useRouter } from "next/router"
 
 export function ImageUploadDemo() {
+  const router = useRouter()
+  
+  // Get email from query params passed from hero.jsx
+  const userEmail = router.query.userEmail || ''
+  
   const {
     previewUrl,
     fileName,
@@ -22,6 +28,8 @@ export function ImageUploadDemo() {
   const [isDragging, setIsDragging] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadedUrl, setUploadedUrl] = useState(null)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [analysisResult, setAnalysisResult] = useState(null)
 
   const handleDragOver = (e) => {
     e.preventDefault()
@@ -69,72 +77,37 @@ export function ImageUploadDemo() {
     setIsUploading(true);
     
     try {
-      // Step 1: Get the pre-signed URL from your API
-      console.log("Getting pre-signed URL...");
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          filename: selectedFile.name,
-          contentType: selectedFile.type,
-        }),
-      });
+      // Create FormData to send the file
+      const formData = new FormData();
+      formData.append('file', selectedFile);
 
-      if (!response.ok) {
-        throw new Error(`Failed to get upload URL: ${response.statusText}`);
-      }
-
-      const { uploadUrl, publicUrl } = await response.json();
-      console.log("Got pre-signed URL:", uploadUrl);
-      console.log("Public URL will be:", publicUrl);
-
-      // Step 2: Upload the actual file to R2 using the pre-signed URL
-      console.log("Uploading file to R2...");
-      console.log("Upload URL:", uploadUrl);
-      console.log("File details:", {
+      console.log("Uploading file...", {
         name: selectedFile.name,
         size: selectedFile.size,
         type: selectedFile.type
       });
-      
-      try {
-        console.log("About to make PUT request...");
-        
-        const uploadResponse = await fetch(uploadUrl, {
-          method: "PUT",
-          body: selectedFile,
-          headers: {
-            "Access-Control-Allow-Origin": "*",
-            "Content-Type": selectedFile.type,
-          },
 
-        });
+      // Send the file directly to your upload API
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData, // Send as FormData, not JSON
+        // Don't set Content-Type header - let the browser set it automatically for FormData
+      });
 
-        console.log("PUT request completed!");
-        console.log("Upload response status:", uploadResponse.status);
-        console.log("Upload response headers:", Object.fromEntries(uploadResponse.headers.entries()));
-
-        if (!uploadResponse.ok) {
-          const errorText = await uploadResponse.text();
-          console.error("Upload error response:", errorText);
-          throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText} - ${errorText}`);
-        }
-        
-        console.log("Upload successful!");
-      } catch (fetchError) {
-        console.error("Fetch error details:", fetchError);
-        console.error("Error name:", fetchError.name);
-        console.error("Error message:", fetchError.message);
-        console.error("Error stack:", fetchError.stack);
-        throw new Error(`Network error during upload: ${fetchError.message}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Upload error:", errorText);
+        throw new Error(`Upload failed: ${response.status} ${response.statusText}`);
       }
 
-      // Step 3: Success! Store the public URL
-      console.log("Upload successful! Image available at:", publicUrl);
-      setUploadedUrl(publicUrl);
-      alert(`Upload successful! Your image is now available at: ${publicUrl}`);
+      // Get the response with the public URL
+      const result = await response.json();
+      console.log("Upload successful!", result);
+     
+
+      // Store the public URL
+      setUploadedUrl(result.publicUrl);
+      alert(`Upload successful! Your image is now available at: ${result.publicUrl}`);
       
     } catch (error) {
       console.error("Upload failed:", error);
@@ -144,8 +117,47 @@ export function ImageUploadDemo() {
     }
   }
 
+  const handleAnalyzeImage = async () => {
+    if (!uploadedUrl) {
+      alert("Please upload an image first!");
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setAnalysisResult(null);
+
+    try {
+      
+      const response = await fetch("/api/ai-input", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          imageUrl: uploadedUrl,
+          email: userEmail
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Analysis failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log("Analysis result:", result);
+      
+      setAnalysisResult(result.response);
+      
+    } catch (error) {
+      console.error("Analysis failed:", error);
+      alert(`Analysis failed: ${error.message}`);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
   return (
-    <div className="w-full max-w-md space-y-6 rounded-xl border-0.5 border-white/50  bg-[#1d2221] p-6 shadow-sm">
+    <div className="w-full translate-y-[13%] max-w-md space-y-6 rounded-xl border-0.5 border-white/50  bg-[#1d2221] p-6 shadow-sm">
       <div className="space-y-2">
         <h3 className="text-lg font-medium">Image Upload</h3>
         <p className="text-sm text-muted-foreground">
@@ -233,6 +245,36 @@ export function ImageUploadDemo() {
               {isUploading ? "Uploading..." : "Upload image"}
             </Button>
           </div>
+
+          {/* Image Analysis Section - Only show after successful upload */}
+          {uploadedUrl && (
+            <div className="mt-6 space-y-4 border-t border-white/10 pt-4">
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium text-white">Find Expiry Date</h4>
+                <p className="text-xs text-muted-foreground">
+                  AI will analyze the image to find the expiry date
+                </p>
+              </div>
+              
+              <Button
+                onClick={handleAnalyzeImage}
+                disabled={isAnalyzing}
+                className="bg-blue-600 hover:bg-blue-700 text-white w-full"
+              >
+                {isAnalyzing ? "Analyzing..." : "Find Expiry Date"}
+              </Button>
+
+              {/* Analysis Result */}
+              {analysisResult && (
+                <div className=" mt-4 p-4 bg-[#2d343a] rounded-lg border border-white/10">
+                  <h5 className="text-sm font-medium text-white mb-2">Expiry Date Found:</h5>
+                  <p className="text-sm text-gray-300 leading-relaxed">
+                    {analysisResult}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
